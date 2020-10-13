@@ -1,4 +1,5 @@
 #include <Adafruit_Si7021.h>
+#include <ESP8266WiFi.h>
 #include <stdio.h>
 #include <math.h>
 #include <ESP8266WebServer.h>
@@ -15,7 +16,7 @@
 
 #define FILTER_COUNT 50 // amount of samples to take for battery voltage filtering
 #define EMPIRICAL_VOLTAGE_OFFSET 0.07
-#define WARN_BATTERY_VOLTAGE 3.2
+#define WARN_BATTERY_VOLTAGE 3.3
 #define CRITICAL_BATTERY_VOLTAGE 3
 #define WARNING_LED 14
 #define CRITICAL_LED 12
@@ -45,6 +46,8 @@ void setup() {
 
   pinMode(WARNING_LED, OUTPUT);
   pinMode(CRITICAL_LED, OUTPUT);
+
+  WiFi.setSleepMode(WIFI_LIGHT_SLEEP, 3);  // Automatic Light Sleep, DTIM listen interval = 3
 
   init_sensor();
   
