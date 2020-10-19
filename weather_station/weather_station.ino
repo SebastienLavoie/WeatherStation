@@ -3,25 +3,24 @@
 #include <stdio.h>
 #include <math.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>  // Requires version 5
 #include "config.h" // Contains WLAN_SSID and WLAN_PASS defines
 #include "utils.c"
 #include <Wire.h>
 
 // API parameters
-#define HTTP_REST_PORT 80
 #define WIFI_RETRY_DELAY 500
 #define MAX_WIFI_INIT_RETRY 50
+#define SERVER_IP "192.168.0.171:8000"
 
 
 #define FILTER_COUNT 50 // amount of samples to take for battery voltage filtering
 #define EMPIRICAL_VOLTAGE_OFFSET 0.07
-#define WARN_BATTERY_VOLTAGE 3.3
+#define WARN_BATTERY_VOLTAGE 3.4
 #define CRITICAL_BATTERY_VOLTAGE 3
-#define WARNING_LED 14
-#define CRITICAL_LED 12
 
-#define BATTERY_HEALTH_CHECK_INTERVAL_MIN 10
+#define SLEEP_TIME_MIN 5 
 
 // Weather information
 float humidity = 0;
@@ -32,22 +31,16 @@ float analogVals[FILTER_COUNT] = {0};
 float voltage = 0;
 float percent_charge = 0;
 
-unsigned long last_query = 0;
-
 bool enableHeater = false;
 // Create instance of si7021 object from adafruit library
 Adafruit_Si7021 sensor = Adafruit_Si7021();
-// Create instance of server object
-ESP8266WebServer http_rest_server(HTTP_REST_PORT);
+
+WiFiClient client;
+HTTPClient http;
 
 void setup() {
   Serial.begin(115200);
   Serial.println();
-
-  pinMode(WARNING_LED, OUTPUT);
-  pinMode(CRITICAL_LED, OUTPUT);
-
-  WiFi.setSleepMode(WIFI_LIGHT_SLEEP, 3);  // Automatic Light Sleep, DTIM listen interval = 3
 
   init_sensor();
   
@@ -61,47 +54,31 @@ void setup() {
     Serial.print("Error connecting to: ");
     Serial.print(WLAN_SSID);
   }
-  config_rest_server_routing();
 
-  http_rest_server.begin();
-  Serial.println("HTTP REST Server Started");
+  if ((WiFi.status() == WL_CONNECTED)) {
+    getBatteryStatus();
+    getWeather();
+    char weather_url[100];
+    char battery_url[100];
+    sprintf(weather_url, "http://%s/weather/livingroom?humidity=%f&&temperature=%f", SERVER_IP, humidity, temp);
+    sprintf(battery_url, "http://%s/battery/livingroom?voltage=%f&&percent_charge=%f", SERVER_IP, voltage, percent_charge);
+
+
+    http.begin(client, weather_url);
+    int httpCode = http.POST("");
+    httpHandleReturn(httpCode);
+    http.end();
+
+    http.begin(client, battery_url);
+    httpCode = http.POST("");
+    httpHandleReturn(httpCode);
+    http.end();
+  }
+Serial.printf("going into Deep Sleep for %d minutes...", SLEEP_TIME_MIN);
+ESP.deepSleep(SLEEP_TIME_MIN * 60E6);
 }
 
 void loop() {
-  http_rest_server.handleClient();
-
-  // Run a health check if we haven't gotten any queries in a while
-  if (millis() - last_query >= (BATTERY_HEALTH_CHECK_INTERVAL_MIN * 60 * 1000)){
-    battery_healthcheck();
-    last_query = millis();   
-  }
-}
-
-void http_get_weather() {
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& jsonObj = jsonBuffer.createObject();
-  char JSONmessageBuffer[200];
-
-  getWeather();
-  jsonObj["humidity"] = humidity;
-  jsonObj["temperature"] = temp;
-  jsonObj.prettyPrintTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
-  http_rest_server.send(200, "application/json", JSONmessageBuffer);
-}
-
-void http_get_battery_status() {
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& jsonObj = jsonBuffer.createObject();
-  char JSONmessageBuffer[200];
-
-  // Also queries and updates the voltage and percentage
-  battery_healthcheck();
-
-  jsonObj["voltage"] = voltage;
-  jsonObj["percent_charge"] = percent_charge;
-  jsonObj.prettyPrintTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
-  http_rest_server.send(200, "application/json", JSONmessageBuffer);
-  last_query = millis();
 }
 
 //---------------------------------------------------------------
@@ -118,6 +95,7 @@ int init_wifi() {
       delay(WIFI_RETRY_DELAY);
       Serial.print("#");
   }
+  WiFi.setAutoReconnect(true);
   return WiFi.status(); // return the WiFi connection status
 }
 //---------------------------------------------------------------
@@ -152,15 +130,6 @@ void init_sensor() {
   Serial.print(" Serial #"); Serial.print(sensor.sernum_a, HEX); Serial.println(sensor.sernum_b, HEX);
 }
 //---------------------------------------------------------------
-void config_rest_server_routing() {
-    http_rest_server.on("/", HTTP_GET, []() {
-        http_rest_server.send(200, "text/html",
-            "Welcome to the ESP8266 REST Web Server");
-    });
-    http_rest_server.on("/weather", HTTP_GET, http_get_weather);
-    http_rest_server.on("/battery", HTTP_GET, http_get_battery_status);
-}
-//---------------------------------------------------------------
 void getWeather() {
   // Measure Relative Humidity from the HTU21D or Si7021
   humidity = sensor.readHumidity();
@@ -187,18 +156,20 @@ void getBatteryStatus(){
   Serial.print("\tPercent Charge: "); Serial.println(percent_charge);
 }
 
-void battery_healthcheck(){
-    getBatteryStatus();
-    if (voltage <= WARN_BATTERY_VOLTAGE)
-      digitalWrite(WARNING_LED, HIGH);
-    else if (voltage <= CRITICAL_BATTERY_VOLTAGE){
-      digitalWrite(WARNING_LED, LOW);
-      digitalWrite(CRITICAL_LED, HIGH);
+void httpHandleReturn(int httpCode){
+        // httpCode will be negative on error
+  if (httpCode > 0) {
+    // HTTP header has been send and Server response header has been handled
+    Serial.printf("[HTTP] POST... code: %d\n", httpCode);
+
+    // file found at server
+    if (httpCode == HTTP_CODE_OK) {
+      const String& payload = http.getString();
+      Serial.println("received payload:\n<<");
+      Serial.println(payload);
+      Serial.println(">>");
     }
-    else {
-      digitalWrite(WARNING_LED, LOW);
-      digitalWrite(CRITICAL_LED, LOW);
-    }
+  } else {
+    Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
 }
-
-
