@@ -13,12 +13,10 @@
 #define WIFI_RETRY_DELAY 500
 #define MAX_WIFI_INIT_RETRY 50
 #define SERVER_IP "192.168.0.171:8000"
-
+#define LOCATION "livingroom"
 
 #define FILTER_COUNT 50 // amount of samples to take for battery voltage filtering
 #define EMPIRICAL_VOLTAGE_OFFSET 0.07
-#define WARN_BATTERY_VOLTAGE 3.4
-#define CRITICAL_BATTERY_VOLTAGE 3
 
 #define SLEEP_TIME_MIN 5 
 
@@ -58,19 +56,43 @@ void setup() {
   if ((WiFi.status() == WL_CONNECTED)) {
     getBatteryStatus();
     getWeather();
-    char weather_url[100];
-    char battery_url[100];
-    sprintf(weather_url, "http://%s/weather/livingroom?humidity=%f&&temperature=%f", SERVER_IP, humidity, temp);
-    sprintf(battery_url, "http://%s/battery/livingroom?voltage=%f&&percent_charge=%f", SERVER_IP, voltage, percent_charge);
+    char weather_url[70];
+    char weather_payload[100];
+    char battery_url[70];
+    char battery_payload[100];
+    char telemetry_url[70];
+    char telemetry_payload[300];
 
+    sprintf(weather_url, "http://%s/weather/%s", SERVER_IP, LOCATION);
+    sprintf(weather_payload, "{\"humidity\": \"%f\", \"temperature\": \"%f\"}", humidity, temp);
 
+    sprintf(battery_url, "http://%s/battery/%s", SERVER_IP, LOCATION);
+    sprintf(battery_payload, "{\"voltage\": \"%f\", \"percent_charge\": \"%f\"}", voltage, percent_charge);
+
+    sprintf(telemetry_url,  "http://%s/telemetry/%s", SERVER_IP, LOCATION);
+    sprintf(telemetry_payload, "{\"Voltage offset\": \"%f\", \"Filter count\": \"%d\", \"Server IP\": \"%s\", \"Sleep time\": \"%d min\", \"location\": \"%s\"}", EMPIRICAL_VOLTAGE_OFFSET, FILTER_COUNT, SERVER_IP, SLEEP_TIME_MIN, LOCATION);
+
+    /* Weather */
     http.begin(client, weather_url);
-    int httpCode = http.POST("");
+    http.addHeader("Content-Type", "application/json");
+    Serial.printf("Posting %s to %s\n", weather_payload, weather_url);
+    int httpCode = http.POST(weather_payload);
     httpHandleReturn(httpCode);
     http.end();
 
+    /* Battery */
     http.begin(client, battery_url);
-    httpCode = http.POST("");
+    http.addHeader("Content-Type", "application/json");
+    Serial.printf("Posting %s to %s\n", battery_payload, battery_url);
+    httpCode = http.POST(battery_payload);
+    httpHandleReturn(httpCode);
+    http.end();
+
+    /* Telemetry */
+    http.begin(client, telemetry_url);
+    http.addHeader("Content-Type", "application/json");
+    Serial.printf("Posting %s to %s\n", telemetry_payload, telemetry_url);
+    httpCode = http.POST(telemetry_payload);
     httpHandleReturn(httpCode);
     http.end();
   }
@@ -150,7 +172,7 @@ void getBatteryStatus(){
   float filtered_val = (analogVals[(int)floor(FILTER_COUNT/2)] + analogVals[((int)floor(FILTER_COUNT/2)) + 1]) / 2; // get mean of two middle values
   
   voltage = ((filtered_val / 1023) * 4.2) + EMPIRICAL_VOLTAGE_OFFSET; // map 8 bit analog value to voltage
-  percent_charge = ((voltage - 3) / 1.2) * 100; // map voltage to percentage of charge
+  percent_charge = ((voltage - 3.3) / 0.9) * 100; // map voltage to percentage of charge
 
   Serial.print("Voltage: "); Serial.print(voltage);
   Serial.print("\tPercent Charge: "); Serial.println(percent_charge);
