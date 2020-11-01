@@ -16,7 +16,7 @@
 #define LOCATION "livingroom"
 
 #define FILTER_COUNT 50 // amount of samples to take for battery voltage filtering
-#define EMPIRICAL_VOLTAGE_OFFSET 0.07
+#define EMPIRICAL_VOLTAGE_OFFSET 0.14
 
 #define SLEEP_TIME_MIN 5 
 
