@@ -6,7 +6,7 @@
 #include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>  // Requires version 5
 #include "config.h" // Contains WLAN_SSID and WLAN_PASS defines
-#include "lib/weather_station_lib.h"
+#include <weather_station_lib.h>
 #include <Wire.h>
 
 // API parameters

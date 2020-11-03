@@ -1,5 +1,5 @@
-#include "weather_station_lib.h"
 #include "Arduino.h"
+#include "weather_station_lib.h"
 
 
 Scout::Scout(float t, float h, float v, float p)
