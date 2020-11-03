@@ -6,28 +6,24 @@
 #include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>  // Requires version 5
 #include "config.h" // Contains WLAN_SSID and WLAN_PASS defines
-#include "utils.c"
+#include "lib/weather_station_lib.h"
 #include <Wire.h>
 
 // API parameters
 #define WIFI_RETRY_DELAY 500
 #define MAX_WIFI_INIT_RETRY 50
-#define SERVER_IP "192.168.0.171:8000"
-#define LOCATION "livingroom"
+#define REST_ENDPOINT "192.168.0.171:8080/rest"
+#define LOCATION "Livingroom"
 
 #define FILTER_COUNT 50 // amount of samples to take for battery voltage filtering
-#define EMPIRICAL_VOLTAGE_OFFSET 0.14
+#define EMPIRICAL_VOLTAGE_OFFSET 0.0
 
 #define SLEEP_TIME_MIN 5 
 
-// Weather information
-float humidity = 0;
-float temp = 0;
+// Create struct for data
+Scout scout(0,0,0,0);
 
-// Battery information
 float analogVals[FILTER_COUNT] = {0};
-float voltage = 0;
-float percent_charge = 0;
 
 bool enableHeater = false;
 // Create instance of si7021 object from adafruit library
@@ -56,45 +52,37 @@ void setup() {
   if ((WiFi.status() == WL_CONNECTED)) {
     getBatteryStatus();
     getWeather();
-    char weather_url[70];
-    char weather_payload[100];
-    char battery_url[70];
-    char battery_payload[100];
-    char telemetry_url[70];
-    char telemetry_payload[300];
 
-    sprintf(weather_url, "http://%s/weather/%s", SERVER_IP, LOCATION);
-    sprintf(weather_payload, "{\"humidity\": \"%f\", \"temperature\": \"%f\"}", humidity, temp);
+    char temp_item[30];
+    char hum_item[30];
+    char voltage_item[30];
+    char percent_item[30];
+    sprintf(temp_item, "%s_temp", LOCATION);
+    sprintf(hum_item, "%s_hum", LOCATION);
+    sprintf(voltage_item, "%s_bat_voltage", LOCATION);
+    sprintf(percent_item, "%s__bat_percent", LOCATION);
 
-    sprintf(battery_url, "http://%s/battery/%s", SERVER_IP, LOCATION);
-    sprintf(battery_payload, "{\"voltage\": \"%f\", \"percent_charge\": \"%f\"}", voltage, percent_charge);
+    char url[70];
+    char value[15];
 
-    sprintf(telemetry_url,  "http://%s/telemetry/%s", SERVER_IP, LOCATION);
-    sprintf(telemetry_payload, "{\"Voltage offset\": \"%f\", \"Filter count\": \"%d\", \"Server IP\": \"%s\", \"Sleep time\": \"%d min\", \"location\": \"%s\"}", EMPIRICAL_VOLTAGE_OFFSET, FILTER_COUNT, SERVER_IP, SLEEP_TIME_MIN, LOCATION);
+    const char* items[4] = {temp_item, hum_item, voltage_item, percent_item};
+    
+    // Post all fields of struct
+    for (int i = 0; i < 4; i++) {
+      sprintf(url, "http://%s/items/%s", REST_ENDPOINT, items[i]);
+      http.begin(client, url);
+      sprintf(value, "%f", scout.get_value(i));
+      http.addHeader("Content-Type", "text/plain");
+      int httpCode = http.POST(value);
+      httpHandleReturn(httpCode);
+      http.end();
+    }
 
-    /* Weather */
-    http.begin(client, weather_url);
-    http.addHeader("Content-Type", "application/json");
-    Serial.printf("Posting %s to %s\n", weather_payload, weather_url);
-    int httpCode = http.POST(weather_payload);
-    httpHandleReturn(httpCode);
-    http.end();
+    // sprintf(battery_url, "http://%s/battery/%s", REST_ENDPOINT, LOCATION);
+    // sprintf(battery_payload, "{\"voltage\": \"%f\", \"percent_charge\": \"%f\"}", voltage, percent_charge);
 
-    /* Battery */
-    http.begin(client, battery_url);
-    http.addHeader("Content-Type", "application/json");
-    Serial.printf("Posting %s to %s\n", battery_payload, battery_url);
-    httpCode = http.POST(battery_payload);
-    httpHandleReturn(httpCode);
-    http.end();
-
-    /* Telemetry */
-    http.begin(client, telemetry_url);
-    http.addHeader("Content-Type", "application/json");
-    Serial.printf("Posting %s to %s\n", telemetry_payload, telemetry_url);
-    httpCode = http.POST(telemetry_payload);
-    httpHandleReturn(httpCode);
-    http.end();
+    // sprintf(telemetry_url,  "http://%s/telemetry/%s", REST_ENDPOINT, LOCATION);
+    // sprintf(telemetry_payload, "{\"Voltage offset\": \"%f\", \"Filter count\": \"%d\", \"Server IP\": \"%s\", \"Sleep time\": \"%d min\", \"location\": \"%s\"}", EMPIRICAL_VOLTAGE_OFFSET, FILTER_COUNT, SERVER_IP, SLEEP_TIME_MIN, LOCATION);
   }
 Serial.printf("going into Deep Sleep for %d minutes...", SLEEP_TIME_MIN);
 ESP.deepSleep(SLEEP_TIME_MIN * 60E6);
@@ -154,10 +142,10 @@ void init_sensor() {
 //---------------------------------------------------------------
 void getWeather() {
   // Measure Relative Humidity from the HTU21D or Si7021
-  humidity = sensor.readHumidity();
+  scout.set_value(HUM_IDX, sensor.readHumidity());
 
   // Measure Temperature from the HTU21D or Si7021
-  temp = sensor.readTemperature();
+  scout.set_value(TEMP_IDX, sensor.readTemperature());
   // Temperature is measured every time RH is requested.
   // It is faster, therefore, to read it from previous RH
   // measurement with getTemp() instead with readTemp()
@@ -171,11 +159,10 @@ void getBatteryStatus(){
   quicksort(analogVals, 0 , FILTER_COUNT - 1); // sort values
   float filtered_val = (analogVals[(int)floor(FILTER_COUNT/2)] + analogVals[((int)floor(FILTER_COUNT/2)) + 1]) / 2; // get mean of two middle values
   
-  voltage = ((filtered_val / 1023) * 4.2) + EMPIRICAL_VOLTAGE_OFFSET; // map 8 bit analog value to voltage
-  percent_charge = ((voltage - 3.3) / 0.9) * 100; // map voltage to percentage of charge
+  scout.set_value(VOLTAGE_IDX, ((filtered_val / 1023) * 4.2) + EMPIRICAL_VOLTAGE_OFFSET); // map 8 bit analog value to voltage, percent is also calculated
 
-  Serial.print("Voltage: "); Serial.print(voltage);
-  Serial.print("\tPercent Charge: "); Serial.println(percent_charge);
+  Serial.print("Voltage: "); Serial.print(scout.get_value(VOLTAGE_IDX));
+  Serial.print("\tPercent Charge: "); Serial.println(scout.get_value(PERCENT_IDX));
 }
 
 void httpHandleReturn(int httpCode){
