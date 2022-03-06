@@ -12,8 +12,8 @@
 // API parameters
 #define WIFI_RETRY_DELAY 500
 #define MAX_WIFI_INIT_RETRY 50
-#define REST_ENDPOINT "192.168.0.171:8080/rest"
-#define LOCATION "Livingroom"
+#define REST_ENDPOINT "10.0.0.173:8080/rest"
+#define LOCATION "Bedroom"
 
 #define FILTER_COUNT 50 // amount of samples to take for battery voltage filtering
 #define EMPIRICAL_VOLTAGE_OFFSET 0.0
@@ -60,7 +60,7 @@ void setup() {
     sprintf(temp_item, "%s_temp", LOCATION);
     sprintf(hum_item, "%s_hum", LOCATION);
     sprintf(voltage_item, "%s_bat_voltage", LOCATION);
-    sprintf(percent_item, "%s__bat_percent", LOCATION);
+    sprintf(percent_item, "%s_bat_percent", LOCATION);
 
     char url[70];
     char value[15];
@@ -149,6 +149,8 @@ void getWeather() {
   // Temperature is measured every time RH is requested.
   // It is faster, therefore, to read it from previous RH
   // measurement with getTemp() instead with readTemp()
+  Serial.print("Humidity: "); Serial.print(scout.get_value(HUM_IDX));
+  Serial.print("\tTemperature "); Serial.println(scout.get_value(TEMP_IDX));
 }
 
 void getBatteryStatus(){
